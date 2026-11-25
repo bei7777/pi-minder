@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Minder 开发记录</title><id>urn:minder:development</id>
+  <updated>2026-11-25T00:00:00Z</updated>
+  <entry><id>urn:minder:development-plan</id><title>三仓库开发计划</title>
+  <updated>2026-11-25T00:00:00Z</updated><summary>发行版仓库的 DEVELOPMENT.md 记录架构与验收标准。</summary></entry>
+</feed>

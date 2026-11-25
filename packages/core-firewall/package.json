@@ -1,0 +1,14 @@
+{
+  "name": "@minder/core-firewall",
+  "description": "Local event triage, quiet hours and action receipts for Minder",
+  "version": "0.1.1",
+  "license": "MIT",
+  "type": "module",
+  "engines": {"node": ">=22.19.0"},
+  "exports": {".": {"types": "./lib/index.d.ts", "import": "./lib/index.js"}},
+  "types": "./lib/index.d.ts",
+  "files": ["lib", "README.md", "LICENSE"],
+  "publishConfig": {"access": "public"},
+  "scripts": {"build": "tsc -p tsconfig.json", "test": "node --test test/*.test.mjs"},
+  "dependencies": {"fast-xml-parser": "5.5.7", "chokidar": "4.0.3"}
+}
