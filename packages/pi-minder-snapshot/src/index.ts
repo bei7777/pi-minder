@@ -11,7 +11,7 @@ import { openSnapshot } from "@minder/core-snapshot";
 
 type Manager = Awaited<ReturnType<typeof openSnapshot>>;
 type Transaction = Awaited<ReturnType<Manager["begin"]>>;
-export interface SnapshotExtensionOptions { stateDir?: string; roots?: string[]; maxFileBytes?: number }
+export interface SnapshotExtensionOptions { stateDir?: string; roots?: string[]; maxFileBytes?: number; additionalTools?: readonly string[] }
 export function createSnapshotExtension(options: SnapshotExtensionOptions = {}): ExtensionFactory {
   return pi => {
     let manager: Promise<Manager> | undefined;
@@ -24,7 +24,7 @@ export function createSnapshotExtension(options: SnapshotExtensionOptions = {}):
     const stateDir = options.stateDir ?? join(process.env.MINDER_HOME ?? join(homedir(), ".minder"), "snapshot");
     const store = () => manager ??= openSnapshot({stateDir,roots:options.roots ?? [workspace],maxFileBytes:options.maxFileBytes});
     const tx = () => transaction ??= store().then(db=>db.begin("Pi file changes"));
-    const managed = new Set(["read","edit","write","minder_delete","minder_move","minder_memory_search","minder_memory_propose","minder_firewall_list"]);
+    const managed = new Set(["read","edit","write","minder_delete","minder_move","minder_list_files","minder_memory_search","minder_memory_propose","minder_firewall_list",...(options.additionalTools??[])]);
     pi.on("context",event=>({messages:event.messages.filter(message=>
       message.role!=="custom" || message.customType!=="minder-file-diff")}));
     const stage = async (operation:()=>Promise<void>, largeOperation?: (confirm:Confirmation)=>Promise<void>) => {
@@ -39,6 +39,15 @@ export function createSnapshotExtension(options: SnapshotExtensionOptions = {}):
     const writeFile = async(path:string,content:string)=>stage(async()=>(await tx()).write(path,content),
       async confirm=>(await store()).irreversibleWrite(path,content,confirm));
     const access = async(path:string)=>{await readFile(path);};
+    pi.registerTool({
+      name:"minder_list_files",label:"List workspace files",
+      description:"List actual file and folder names in a workspace directory. The default is the workspace root. Use this before guessing document paths; follow nextOffset for additional pages. Staged writes appear after commit.",
+      parameters:Type.Object({path:Type.Optional(Type.String()),offset:Type.Optional(Type.Integer({minimum:0})),limit:Type.Optional(Type.Integer({minimum:1,maximum:200}))}),
+      async execute(_id,{path,offset,limit}){
+        const page=(await store()).listDirectory(path??".",offset,limit);
+        return {content:[{type:"text",text:JSON.stringify(page)}],details:page};
+      }
+    });
     pi.registerTool(createReadToolDefinition(workspace,{operations:{readFile,access}}));
     pi.registerTool(createEditToolDefinition(workspace,{operations:{readFile,writeFile,access}}));
     pi.registerTool(createWriteToolDefinition(workspace,{operations:{writeFile,mkdir:async(dir)=>{

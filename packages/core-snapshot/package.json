@@ -2,7 +2,7 @@
   "name": "@minder/core-snapshot",
   "repository": {"type":"git","url":"git+https://github.com/bei7777/pi-minder.git","directory":"packages/core-snapshot"},
   "homepage": "https://github.com/bei7777/pi-minder/tree/main/packages/core-snapshot#readme",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Recoverable local file transactions for Minder",
   "type": "module",
   "license": "MIT",

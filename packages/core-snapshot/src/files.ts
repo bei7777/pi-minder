@@ -45,6 +45,12 @@ export class PathPolicy {
     ].flatMap(p => existsSync(p) ? [resolve(p), realpathSync.native(p)] : [resolve(p)]);
   }
   file(input: string): string {
+    return this.check(input, false);
+  }
+  directory(input: string): string {
+    return this.check(input, true);
+  }
+  private check(input: string, directory: boolean): string {
     if (!input || input.includes("\0"))
       throw new SnapshotError("PATH", "Invalid file path.");
     const path = resolve(this.roots[0]!, input);
@@ -52,10 +58,10 @@ export class PathPolicy {
         path.slice(3).split(sep).some(part => /[. ]$|^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(part))))
       throw new SnapshotError("PATH", "Unsupported Windows path: " + path);
     if (basename(path).startsWith(".minder-tx-")) throw new SnapshotError("PATH", "Reserved staging name.");
-    const root = this.roots.find(r => within(r, path) && r !== path);
+    const root = this.roots.find(r => within(r, path) && (directory || r !== path));
     if (!root) throw new SnapshotError("OUTSIDE_ROOT", "Outside configured roots: " + path);
-    const components = relative(root, path).split(sep);
-    if (components.some(part => [".git", ".ssh", ".gnupg"].includes(part.toLowerCase())))
+    const components = relative(root, path).split(sep).filter(Boolean);
+    if (path.split(sep).some(part => [".git", ".ssh", ".gnupg"].includes(part.toLowerCase())))
       throw new SnapshotError("PROTECTED", "Protected directory: " + path);
     let cursor = root;
     if (realpathSync.native(root) !== root) throw new SnapshotError("SYMLINK", "Root changed: " + root);
@@ -65,8 +71,12 @@ export class PathPolicy {
       if (item?.isSymbolicLink()) throw new SnapshotError("SYMLINK", "Symbolic link or junction: " + cursor);
       if (i < components.length - 1 && !item?.isDirectory())
         throw new SnapshotError("PARENT", "Parent directory unavailable: " + cursor);
-      if (i === components.length - 1 && item && (!item.isFile() || item.nlink > 1))
-        throw new SnapshotError("TYPE", "Only unaliased regular files can be managed: " + cursor);
+      if (i === components.length - 1) {
+        if (directory && !item?.isDirectory())
+          throw new SnapshotError("TYPE", "Select an existing directory: " + cursor);
+        if (!directory && item && (!item.isFile() || item.nlink > 1))
+          throw new SnapshotError("TYPE", "Only unaliased regular files can be managed: " + cursor);
+      }
     }
     const canonical = optionalStat(path) ? realpathSync.native(path) : join(realpathSync.native(dirname(path)), basename(path));
     const folded = (s: string) => s.normalize("NFC").toLowerCase();

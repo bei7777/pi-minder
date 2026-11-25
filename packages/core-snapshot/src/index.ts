@@ -91,6 +91,32 @@ export class SnapshotManager {
       );
     `);
   }
+  listDirectory(path = ".", offset = 0, limit = 100) {
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 200)
+      throw new SnapshotError("RANGE","Choose a nonnegative offset and a page size from 1 to 200.");
+    const directory = this.policy.directory(path);
+    const rows = readdirSync(directory,{withFileTypes:true})
+      .sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0);
+    const entries: {name:string; kind:"file"|"directory"}[] = [];
+    let seen=0;
+    let nextOffset:number|null=null;
+    for(const row of rows) {
+      if(row.isSymbolicLink() || !(row.isFile() || row.isDirectory())) continue;
+      const candidate = join(directory,row.name);
+      try {
+        if(row.isDirectory()) this.policy.directory(candidate);
+        else this.policy.file(candidate);
+      } catch(error) {
+        if(error instanceof SnapshotError && ["TYPE","SYMLINK","PROTECTED","PATH"].includes(error.code)) continue;
+        throw error;
+      }
+      if(seen++ < offset) continue;
+      if(entries.length===limit) {nextOffset=offset+limit;break;}
+      entries.push({name:row.name,kind:row.isDirectory()?"directory":"file"});
+    }
+    this.policy.directory(directory);
+    return {entries,nextOffset};
+  }
   private acquire(): void {
     if (this.locked) throw new SnapshotError("BUSY", "Another snapshot transaction is active.");
     try { this.mutex.exec("BEGIN IMMEDIATE"); }

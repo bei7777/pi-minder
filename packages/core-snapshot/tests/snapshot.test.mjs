@@ -25,6 +25,23 @@ async function fixture(t, settings = {}) {
   return {options,root,stateDir,manager, path:name=>join(root,name)};
 }
 
+test("list the workspace without guessing names or following protected directories",async t=>{
+  const {manager,path,stateDir}=await fixture(t);
+  mkdirSync(path(".git"));
+  mkdirSync(path("材料"));
+  writeFileSync(path("材料/讨论纪要.md"),"纪要");
+  writeFileSync(path("部署说明.md"),"说明");
+  symlinkSync(stateDir,path("alias"),process.platform==="win32"?"junction":"dir");
+  const first=manager.listDirectory(".",0,1);
+  assert.deepEqual(first,{entries:[{name:"材料",kind:"directory"}],nextOffset:1});
+  assert.deepEqual(manager.listDirectory(".",first.nextOffset,1),{entries:[{name:"部署说明.md",kind:"file"}],nextOffset:null});
+  assert.deepEqual(manager.listDirectory("材料").entries,[{name:"讨论纪要.md",kind:"file"}]);
+  assert.throws(()=>manager.listDirectory(".."),{code:"OUTSIDE_ROOT"});
+  assert.throws(()=>manager.listDirectory(".git"),{code:"PROTECTED"});
+  assert.throws(()=>manager.listDirectory("alias"),{code:"SYMLINK"});
+  assert.throws(()=>manager.listDirectory(".",0,201),{code:"RANGE"});
+});
+
 test("create, modify, rename and delete appear as one reviewed transaction",async t=>{
   const {manager,path,stateDir} = await fixture(t);
   writeFileSync(path("notes"),"old\n");
