@@ -1,6 +1,8 @@
 {
   "name": "pi-minder-firewall",
-  "version": "0.1.2",
+  "repository": {"type":"git","url":"git+https://github.com/bei7777/pi-minder.git","directory":"packages/pi-minder-firewall"},
+  "homepage": "https://github.com/bei7777/pi-minder/tree/main/packages/pi-minder-firewall#readme",
+  "version": "0.1.4",
   "description": "Attention rules and actionable notices",
   "type": "module",
   "license": "MIT",

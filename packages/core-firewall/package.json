@@ -1,7 +1,9 @@
 {
   "name": "@minder/core-firewall",
+  "repository": {"type":"git","url":"git+https://github.com/bei7777/pi-minder.git","directory":"packages/core-firewall"},
+  "homepage": "https://github.com/bei7777/pi-minder/tree/main/packages/core-firewall#readme",
   "description": "Local event triage, quiet hours and action receipts for Minder",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "license": "MIT",
   "type": "module",
   "engines": {"node": ">=22.19.0"},

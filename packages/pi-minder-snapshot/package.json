@@ -1,6 +1,8 @@
 {
   "name": "pi-minder-snapshot",
-  "version": "0.1.2",
+  "repository": {"type":"git","url":"git+https://github.com/bei7777/pi-minder.git","directory":"packages/pi-minder-snapshot"},
+  "homepage": "https://github.com/bei7777/pi-minder/tree/main/packages/pi-minder-snapshot#readme",
+  "version": "0.1.4",
   "description": "Transactional file changes and recovery",
   "type": "module",
   "license": "MIT",

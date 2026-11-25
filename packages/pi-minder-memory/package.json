@@ -1,6 +1,8 @@
 {
   "name": "pi-minder-memory",
-  "version": "0.1.2",
+  "repository": {"type":"git","url":"git+https://github.com/bei7777/pi-minder.git","directory":"packages/pi-minder-memory"},
+  "homepage": "https://github.com/bei7777/pi-minder/tree/main/packages/pi-minder-memory#readme",
+  "version": "0.1.4",
   "description": "Auditable Markdown memory and full-text search",
   "type": "module",
   "license": "MIT",
