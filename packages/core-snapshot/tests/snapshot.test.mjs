@@ -26,7 +26,7 @@ async function fixture(t, settings = {}) {
 }
 
 test("create, modify, rename and delete appear as one reviewed transaction",async t=>{
-  const {manager,path} = await fixture(t);
+  const {manager,path,stateDir} = await fixture(t);
   writeFileSync(path("notes"),"old\n");
   writeFileSync(path("archive"),"history\n");
   const tx = await manager.begin("weekly materials");
@@ -41,6 +41,11 @@ test("create, modify, rename and delete appear as one reviewed transaction",asyn
   assert.match(diff.files.find(f=>f.path===path("notes")).patch,/-old\n\+new/);
   assert.equal(existsSync(path("archive")),false);
   assert.equal(readFileSync(path("history"),"utf8"),"history\n");
+  const journal = new DatabaseSync(join(stateDir,"journal.sqlite"),{readOnly:true});
+  try {
+    const entry = journal.prepare("SELECT afterMode FROM entries WHERE tx=? AND path=?").get(tx.id,path("new"));
+    assert.equal(entry.afterMode,statSync(path("new")).mode & 0o777);
+  } finally { journal.close(); }
   assert.equal((await manager.undo(tx.id)).status,"undone");
   assert.equal(readFileSync(path("notes"),"utf8"),"old\n");
   assert.equal(readFileSync(path("archive"),"utf8"),"history\n");

@@ -6,7 +6,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createTwoFilesPatch } from "diff";
-import { flushDirectory, flushFile, hashFile, ObjectStore, PathPolicy, SnapshotError } from "./files.js";
+import { effectiveMode, flushDirectory, flushFile, hashFile, ObjectStore, PathPolicy, SnapshotError } from "./files.js";
 export { SnapshotError } from "./files.js";
 
 export interface SnapshotOptions {
@@ -182,6 +182,12 @@ export class SnapshotManager {
     for (const e of this.entries(id)) {
       const path = this.policy.file(e.path);
       const state = current(path,this.maxFile);
+      // 旧事务可能只记录了创建文件时请求的权限。按相同目录的真实文件系统验证。
+      if ((reverse || recovering) && e.after !== null && state.hash === e.after && state.mode !== e.afterMode
+        && effectiveMode(path,e.afterMode) === state.mode) {
+        this.db.prepare("UPDATE entries SET afterMode=? WHERE tx=? AND path=?").run(state.mode,id,e.path);
+        e.afterMode = state.mode;
+      }
       const origin = reverse ? matches(state,e.after,e.afterMode) : matches(state,e.before,e.beforeMode);
       const destination = reverse ? matches(state,e.before,e.beforeMode) : matches(state,e.after,e.afterMode);
       if (!origin && !(recovering && destination))
@@ -202,7 +208,11 @@ export class SnapshotManager {
       if (matches(state,hash,mode)) continue;
       if (!(reverse ? matches(state,e.after,e.afterMode) : matches(state,e.before,e.beforeMode)))
         throw new SnapshotError("CONFLICT", "File changed before publishing: " + path);
-      this.objects.publish(hash,mode,path,e.scratch);
+      this.objects.publish(hash,mode,path,e.scratch,actualMode=>{
+        if (reverse) throw new SnapshotError("CONFLICT","Cannot restore original mode on this volume: " + path);
+        // 替换前持久化目标卷实际提供的权限，确保中断后可识别已经发布的文件。
+        this.db.prepare("UPDATE entries SET afterMode=? WHERE tx=? AND path=?").run(actualMode,id,e.path);
+      });
     }
     this.setStatus(id,reverse ? "undone" : "committed");
   }

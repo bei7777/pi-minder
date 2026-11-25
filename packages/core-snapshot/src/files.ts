@@ -98,6 +98,19 @@ export function flushDirectory(path: string): void {
   try { fsyncSync(fd); } finally { closeSync(fd); }
 }
 
+/** 查询挂载卷对给定权限的实际表示，用于校验历史记录。 */
+export function effectiveMode(path: string, requested: number): number {
+  const probe = join(dirname(path), ".minder-tx-" + randomUUID());
+  const fd = openSync(probe, "wx", 0o600);
+  try {
+    chmodSync(probe, requested);
+    return statSync(probe).mode & 0o777;
+  } finally {
+    closeSync(fd);
+    unlinkSync(probe);
+  }
+}
+
 function copy(source: string, destination: string): void {
   try {
     copyFileSync(source, destination, constants.COPYFILE_FICLONE_FORCE | constants.COPYFILE_EXCL);
@@ -129,7 +142,7 @@ export class ObjectStore {
     } finally { if (existsSync(temp)) unlinkSync(temp); }
   }
   buffer(hash: string): Buffer { return readFileSync(join(this.dir, hash)); }
-  publish(hash: string | null, mode: number, path: string, scratch: string): void {
+  publish(hash: string | null, mode: number, path: string, scratch: string, modeChanged: (actual: number) => void): void {
     if (hash === null) {
       unlinkSync(path);
     } else {
@@ -142,6 +155,8 @@ export class ObjectStore {
         // 在恢复原始权限之前同步，允许恢复只读文件。
         flushFile(stage);
         chmodSync(stage, mode);
+        const actualMode = statSync(stage).mode & 0o777;
+        if (actualMode !== mode) modeChanged(actualMode);
         renameSync(stage, path);
       } finally { if (optionalStat(stage)) unlinkSync(stage); }
     }
