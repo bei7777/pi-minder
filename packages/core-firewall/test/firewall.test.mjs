@@ -130,10 +130,10 @@ test("真实文件变更进入监听记录", async t => {
   db.configure({rules:[{sourceId:"dir:"+await realpath(root),score:5,bypassQuiet:true}],cooldownMinutes:0});
   let failure;
   const stop = await watchDirectory(db,root,e=>{failure=e;});
-  async function waitFor(kind) {
+  async function waitFor(kind, count = 1) {
     for (let i=0;i<150;i++) {
       if (failure) throw failure;
-      if (db.list().some(e=>e.kind===kind)) return;
+      if (db.list().filter(e=>e.kind===kind).length >= count) return;
       await delay(40);
     }
     assert.fail("没有收到文件事件 "+kind);
@@ -142,6 +142,7 @@ test("真实文件变更进入监听记录", async t => {
     const path=join(root,"笔记.md");
     await writeFile(path,"初稿"); await waitFor("created");
     await writeFile(path,"已修订"); await waitFor("modified");
+    await writeFile(path,"完成第二次修订"); await waitFor("modified",2);
     await unlink(path); await waitFor("deleted");
     const [card] = db.dispatchDue();
     checkCard(card);

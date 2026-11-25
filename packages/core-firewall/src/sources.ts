@@ -120,13 +120,26 @@ export async function watchDirectory(store: Firewall, directory: string, reportE
   const schedule = () => {
     if (pending || closed) return;
     pending = true;
-    queue = queue.then(async () => { pending = false; if (!closed) await reconcile(); }).catch(reportError);
+    queue = queue.then(async () => { pending = false; await reconcile(); }).catch(reportError);
+  };
+  let eventTimer: NodeJS.Timeout | undefined;
+  const changed = () => {
+    if (eventTimer || closed) return;
+    eventTimer = setTimeout(() => { eventTimer = undefined; schedule(); }, 100);
   };
   const watcher = chokidar.watch(root, { ignored, followSymlinks: false, ignoreInitial: true });
-  watcher.on("all", schedule);
+  // 上游会合并相邻的 change 通知。按短时间窗口核对原生事件后的实际文件状态。
+  watcher.on("raw", changed);
+  watcher.on("all", changed);
   await new Promise<void>((ok, fail) => { watcher.once("ready", ok); watcher.once("error", fail); });
   watcher.on("error", err => reportError(err instanceof Error ? err : new Error(String(err))));
   try { schedule(); await queue; } catch (error) { await watcher.close(); throw error; }
   const timer = setInterval(schedule, 60000);
-  return async () => { closed = true; clearInterval(timer); await watcher.close(); await queue; };
+  return async () => {
+    clearInterval(timer);
+    if (eventTimer) { clearTimeout(eventTimer); schedule(); }
+    closed = true;
+    await watcher.close();
+    await queue;
+  };
 }
