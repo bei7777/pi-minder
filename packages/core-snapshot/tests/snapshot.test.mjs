@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { fork } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
@@ -118,6 +118,31 @@ test("quota evicts oldest completed snapshots and preserves the last admitted st
   await second.commit();
   assert.equal(existsSync(path("c")),false);
   assert.equal(readFileSync(path("b"),"utf8"),"abcde");
+});
+
+test("a 500 MB plus one byte file only creates an audit record",async t=>{
+  const {manager,path,stateDir} = await fixture(t);
+  writeFileSync(path("recording"),"");
+  truncateSync(path("recording"),500_000_001);
+  const tx = await manager.begin("size policy");
+  await assert.rejects(tx.write("recording","changed"),{code:"LARGE_FILE"});
+  await tx.abort();
+  assert.equal(statSync(path("recording")).size,500_000_001);
+  assert.deepEqual(readdirSync(join(stateDir,"objects")),[]);
+});
+
+test("empty files and binary data survive replace and undo byte for byte",async t=>{
+  const {manager,path} = await fixture(t);
+  const bytes = Buffer.from([0,255,42,0,128]);
+  writeFileSync(path("blob"),bytes);
+  writeFileSync(path("empty"),"");
+  const tx = await manager.begin("bytes");
+  await tx.write("blob",Buffer.from([11,0,254]));
+  await tx.remove("empty");
+  assert.match((await tx.commit()).files.find(f=>f.path===path("blob")).patch,/Binary/);
+  await manager.undo(tx.id);
+  assert.deepEqual(readFileSync(path("blob")),bytes);
+  assert.equal(readFileSync(path("empty")).length,0);
 });
 
 test("time-based retention removes expired history",async t=>{
