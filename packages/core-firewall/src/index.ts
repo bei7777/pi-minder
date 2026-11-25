@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { stripVTControlCharacters } from "node:util";
 
 export type Score = 1 | 2 | 3 | 4 | 5;
 export interface SourceEvent {
@@ -32,6 +33,62 @@ export interface Decision extends SourceEvent {
   dueAt: number;
   deliveredAt: number | null;
   groupKey: string;
+}
+
+export interface ActionCard extends Decision {
+  status: "ready";
+  title: string;
+  summary: string;
+  action: { label: string; text: string };
+  draftPreviewOnly: boolean;
+}
+
+const sentences = new Intl.Segmenter("zh", { granularity: "sentence" });
+const graphemes = new Intl.Segmenter("zh", { granularity: "grapheme" });
+const fileChanges: ReadonlyMap<string, string> = new Map([
+  ["created", "创建"], ["modified", "修改"], ["deleted", "删除"]
+]);
+
+function singleLine(text: string): string {
+  return stripVTControlCharacters(text).replace(/[\p{Cc}\p{Bidi_Control}\s]+/gu, " ").trim();
+}
+
+function shorten(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  let end = 0;
+  for (const {index, segment} of graphemes.segment(text)) {
+    if (index + segment.length >= limit) break;
+    end = index + segment.length;
+  }
+  return text.slice(0, end).trimEnd() + "…";
+}
+
+function cardSummary(event: Decision, fileChange: string | undefined): string {
+  if (fileChange) return "监听目录中的文件已经" + fileChange + "。 文件名称与变更时间已记入本地日志。";
+  const parts: string[] = [];
+  for (const {segment} of sentences.segment(singleLine(event.summary))) {
+    if (!/[\p{L}\p{N}\p{S}]/u.test(segment)) continue;
+    const excerpt = shorten(segment.trim(), 78);
+    parts.push(/[\p{Sentence_Terminal}]["'\p{Pe}\p{Pf}]*$/u.test(excerpt) ? excerpt : excerpt + "。");
+    if (parts.length === 2) break;
+  }
+  if (!parts.length) parts.push(event.kind === "feed" ? "订阅中出现了新的条目。" : "收到新的来源事件。");
+  if (parts.length === 1) parts.push("来源和记录时间可在本地事件日志中查看。");
+  return parts.join(" ");
+}
+
+function cardFor(event: Decision): ActionCard {
+  const title = shorten(singleLine(event.title), 80) || "未命名事件";
+  const fileChange = event.sourceId.startsWith("dir:") ? fileChanges.get(event.kind) : undefined;
+  const label = fileChange ? "核对文件变更" : event.kind === "feed" ? "整理订阅待办" : "核对事件";
+  const generatedDraft = fileChange ? `请核对文件「${title}」的${fileChange}记录，列出需要处理的事项。`
+    : event.kind === "feed" ? `请根据订阅条目「${title}」整理待办事项。`
+    : `请核对事件「${title}」并列出待办事项。`;
+  const draft = event.action?.text ?? generatedDraft;
+  const preview = shorten(singleLine(draft), 160);
+  return { ...event, status: "ready", title, summary: cardSummary(event, fileChange),
+    action: { label: shorten(singleLine(event.action?.label ?? label), 32) || label, text: preview },
+    draftPreviewOnly: preview !== draft };
 }
 
 const defaults: Rules = {
@@ -149,10 +206,12 @@ export class Firewall {
     if (!row) throw new Error("找不到对应的事件");
     return decode(row);
   }
+  list(status: "ready"): ActionCard[];
+  list(status?: string): Decision[];
   list(status?: string): Decision[] {
     const rows = status ? this.db.prepare("SELECT * FROM events WHERE status=? ORDER BY rowid DESC").all(status)
       : this.db.prepare("SELECT * FROM events ORDER BY rowid DESC").all();
-    return rows.map(decode);
+    return rows.map(row => status === "ready" ? cardFor(decode(row)) : decode(row));
   }
   explain(id: string, at = new Date()) {
     const decision = this.get(id);
@@ -169,8 +228,8 @@ export class Firewall {
     }
     return {decision, waitingFor, policyAtIngest: policy ? JSON.parse(String(policy.json)) : null};
   }
-  inbox(): { title: string; events: Decision[] }[] {
-    const groups = new Map<string, {title: string; events: Decision[]}>();
+  inbox(): { title: string; events: ActionCard[] }[] {
+    const groups = new Map<string, {title: string; events: ActionCard[]}>();
     for (const e of this.list("ready")) {
       const key = e.score === 4 ? "digest:" + e.dueAt : e.id;
       const group = groups.get(key) ?? {title: e.score === 4 ? "定时汇总" : e.title, events: []};
@@ -179,7 +238,7 @@ export class Firewall {
     }
     return [...groups.values()];
   }
-  dispatchDue(at = new Date()): Decision[] {
+  dispatchDue(at = new Date()): ActionCard[] {
     const now = at.getTime();
     return this.transaction(() => {
       const config = this.settings();
@@ -192,7 +251,7 @@ export class Firewall {
         const prev = this.db.prepare("SELECT MAX(delivered_at) AS last FROM events WHERE group_key=?").get(event.groupKey);
         if (prev?.last != null && Number(prev.last) + config.cooldownMinutes * 60000 > now) continue;
         this.db.prepare("UPDATE events SET status='ready',delivered_at=? WHERE id=?").run(now, event.id);
-        delivered.push(this.get(event.id));
+        delivered.push(cardFor({ ...event, deliveredAt: now, status: "ready" }));
       }
       return delivered;
     });
@@ -204,7 +263,7 @@ export class Firewall {
       const existing = this.db.prepare("SELECT draft,at FROM receipts WHERE event_id=?").get(id);
       if (existing) return { text: String(existing.draft), at: Number(existing.at) };
       if (event.status !== "ready") throw new Error("当前行动卡不可执行");
-      const text = event.action?.text ?? event.summary;
+      const text = event.action?.text ?? cardFor(event).action.text;
       const at = Date.now();
       this.db.prepare("INSERT INTO receipts VALUES(?,?,?)").run(id,text,at);
       this.db.prepare("UPDATE events SET status='accepted' WHERE id=?").run(id);

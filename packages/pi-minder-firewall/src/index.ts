@@ -45,7 +45,8 @@ export function createFirewallExtension(options: FirewallExtensionOptions = {}):
         const digests=ready.filter(d=>d.score===4);
         if (digests.length) ctx.ui.notify("Minder 汇总 · " + digests.length + " 项，使用 /minder-firewall list 查看","info");
         for (const card of ready.filter(d=>d.score===5)) {
-          ctx.ui.notify(stripVTControlCharacters(card.title + "\n" + card.summary + "\n" + (card.action?.label ?? "查看草稿") + " · " + card.id),"info");
+          const option = card.action ? card.action.label + " · " + card.action.text : "查看草稿";
+          ctx.ui.notify(stripVTControlCharacters([card.title,card.summary,option,"/minder-firewall accept "+card.id].join("\n")),"info");
         }
         backend.checkpoint("pi:minder:shown",JSON.stringify(inbox.map(card=>card.id)));
       })();

@@ -1,7 +1,7 @@
 {
   "name": "@minder/core-firewall",
   "description": "Local event triage, quiet hours and action receipts for Minder",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "license": "MIT",
   "type": "module",
   "engines": {"node": ">=22.19.0"},

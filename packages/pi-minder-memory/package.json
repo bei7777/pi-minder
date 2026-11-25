@@ -1,6 +1,6 @@
 {
   "name": "pi-minder-memory",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Auditable Markdown memory and full-text search",
   "type": "module",
   "license": "MIT",

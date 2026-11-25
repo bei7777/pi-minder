@@ -1,6 +1,6 @@
 {
   "name": "pi-minder-firewall",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Attention rules and actionable notices",
   "type": "module",
   "license": "MIT",
