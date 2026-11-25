@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { fork } from "node:child_process";
+import { fork, spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { openSnapshot } from "../lib/index.js";
 
 async function fixture(t, settings = {}) {
@@ -51,22 +52,58 @@ test("create, modify, rename and delete appear as one reviewed transaction",asyn
 test("concurrent managers serialize writes and conflicting user edits survive",async t=>{
   const {manager,options,path} = await fixture(t);
   const second = await openSnapshot(options);
-  t.after(()=>second.close());
-  const tx = await manager.begin("two participants");
-  await assert.rejects(second.begin("busy"),{code:"BUSY"});
-  await tx.write("first","one");
-  await tx.write("second","two");
-  await tx.commit();
-  writeFileSync(path("second"),"human");
-  await assert.rejects(second.undo(tx.id),{code:"CONFLICT"});
-  assert.equal(readFileSync(path("first"),"utf8"),"one");
-  assert.equal(readFileSync(path("second"),"utf8"),"human");
-  const stale = await manager.begin("stale");
-  await stale.write("second","update");
-  writeFileSync(path("second"),"new human content");
-  await assert.rejects(stale.commit(),{code:"CONFLICT"});
-  assert.equal(readFileSync(path("second"),"utf8"),"new human content");
+  try {
+    const tx = await manager.begin("two participants");
+    await assert.rejects(second.begin("busy"),{code:"BUSY"});
+    await tx.write("first","one");
+    await tx.write("second","two");
+    await tx.commit();
+    writeFileSync(path("second"),"human");
+    await assert.rejects(second.undo(tx.id),{code:"CONFLICT"});
+    assert.equal(readFileSync(path("first"),"utf8"),"one");
+    assert.equal(readFileSync(path("second"),"utf8"),"human");
+    const stale = await manager.begin("stale");
+    await stale.write("second","update");
+    writeFileSync(path("second"),"new human content");
+    await assert.rejects(stale.commit(),{code:"CONFLICT"});
+    assert.equal(readFileSync(path("second"),"utf8"),"new human content");
+  } finally { second.close(); }
 });
+
+if (process.platform === "win32") {
+  test("Windows sharing restrictions prevent partial undo and a retry restores both paths", async t=>{
+    const {manager,path} = await fixture(t);
+    writeFileSync(path("first.txt"),"first");
+    writeFileSync(path("locked.txt"),"second");
+    const tx = await manager.begin("Windows file sharing");
+    for (const input of ["//minder.invalid/share/note","notes.txt:stream","NUL.txt"]) {
+      await assert.rejects(tx.write(input,"data"),{code:"PATH"});
+    }
+    await tx.write(path("first.txt"),"edited");
+    await tx.write(path("locked.txt"),"edited");
+    await tx.commit();
+    const helper = fileURLToPath(new URL("./lock.ps1",import.meta.url));
+    const child = spawn("pwsh",["-NoProfile","-NonInteractive","-File",helper,path("locked.txt")],
+      {stdio:["pipe","pipe","inherit"], timeout:30000});
+    const exited = once(child,"exit");
+    try {
+      const [ready] = await Promise.race([
+        once(child.stdout,"data"),
+        exited.then(([code])=>{throw new Error("File lock process exited early: "+code);})
+      ]);
+      assert.equal(ready.toString().trim(),"locked");
+      await assert.rejects(manager.undo(tx.id),error=>["EBUSY","EPERM","EACCES"].includes(error.code));
+      assert.equal(readFileSync(path("first.txt"),"utf8"),"edited");
+    } finally {
+      child.stdin.end("\n");
+      const [code] = await exited;
+      assert.equal(code,0);
+    }
+    await manager.undo(tx.id);
+    assert.equal(readFileSync(path("first.txt"),"utf8"),"first");
+    assert.equal(readFileSync(path("locked.txt"),"utf8"),"second");
+  });
+}
 
 test("reject traversal, protected ancestors, links and aliased regular files",async t=>{
   const {manager,root,path,stateDir} = await fixture(t);

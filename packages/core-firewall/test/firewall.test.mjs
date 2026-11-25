@@ -87,7 +87,8 @@ test("本地 HTTP 服务器发布实际项目公告的 Atom 订阅", async t => 
   const docs = await Promise.all(["../README.md","../../core-memory/README.md","../../core-snapshot/README.md","../../../LICENSE"]
     .map(file=>readFile(new URL(file,import.meta.url),"utf8")));
   const heading = "Minder 发布说明。以下为三个核心模块的使用文档。";
-  const article = (heading + "\n" + docs.join("\n")).slice(0,4096).trimEnd();
+  const article = (heading + "\r\n" + docs.join("\r\n")).slice(0,4096).trimEnd();
+  const xmlText = article.replace(/\r\n?/gu,"\n");
   assert.ok(article.length > 3000);
   const rss = new XMLBuilder().build({rss:{channel:{title:"Minder",item:{
     title:"核心模块使用文档",guid:"urn:minder:core-manuals",description:article
@@ -115,8 +116,8 @@ test("本地 HTTP 服务器发布实际项目公告的 Atom 订阅", async t => 
     const visibleFields = new Set(["status","title","summary","action","deliveredAt"]);
     for (const [key,value] of Object.entries(item))
       if (!visibleFields.has(key)) assert.deepEqual(card[key],value);
-    assert.equal(db.get(item.id).summary,article);
-    assert.equal(db.explain(item.id).decision.summary,article);
+    assert.equal(db.get(item.id).summary,xmlText);
+    assert.equal(db.explain(item.id).decision.summary,xmlText);
     assert.deepEqual(db.list("ready"),[card]);
     assert.deepEqual(db.inbox(),[{title:card.title,events:[card]}]);
     assert.equal(db.accept(item.id,item.revision).text,card.action.text);
