@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { lstat, readdir, realpath } from "node:fs/promises";
+import { lstat, readdir, realpath, statfs } from "node:fs/promises";
+import { release } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
 import chokidar from "chokidar";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
@@ -81,6 +82,11 @@ export async function syncFeed(store: Firewall, address: string, scorer?: Scorer
 
 export async function watchDirectory(store: Firewall, directory: string, reportError: (err: Error) => void, scorer?: Scorer) {
   const root = await realpath(directory);
+  // WSL 的 Windows 挂载卷可从 Windows 端改写，Linux 文件通知可能缺失。
+  const pollVolume = process.platform === "linux" && (
+    (await statfs(root)).type === 0x01021997 ||
+    (/microsoft/i.test(release()) && /^\/mnt\/[a-z](?:\/|$)/i.test(root))
+  );
   const sourceId = "dir:" + root;
   const prev: Record<string,string> = JSON.parse(store.cursor(sourceId) ?? "{}");
   const known = new Map(Object.entries(prev));
@@ -127,14 +133,16 @@ export async function watchDirectory(store: Firewall, directory: string, reportE
     if (eventTimer || closed) return;
     eventTimer = setTimeout(() => { eventTimer = undefined; schedule(); }, 100);
   };
-  const watcher = chokidar.watch(root, { ignored, followSymlinks: false, ignoreInitial: true });
+  const watcher = chokidar.watch(root, {
+    ignored, followSymlinks: false, ignoreInitial: true, usePolling: pollVolume, interval: 500
+  });
   // 上游会合并相邻的 change 通知。按短时间窗口核对原生事件后的实际文件状态。
   watcher.on("raw", changed);
   watcher.on("all", changed);
   await new Promise<void>((ok, fail) => { watcher.once("ready", ok); watcher.once("error", fail); });
   watcher.on("error", err => reportError(err instanceof Error ? err : new Error(String(err))));
   try { schedule(); await queue; } catch (error) { await watcher.close(); throw error; }
-  const timer = setInterval(schedule, 60000);
+  const timer = setInterval(schedule, pollVolume ? 2000 : 60000);
   return async () => {
     clearInterval(timer);
     if (eventTimer) { clearTimeout(eventTimer); schedule(); }
